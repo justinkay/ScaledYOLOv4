@@ -93,8 +93,16 @@ def output_to_target(output, width, height):
 
     targets = []
     for i, o in enumerate(output):
+        
+        if isinstance(o, torch.Tensor):
+            o = o.cpu().numpy()
+        
         if o is not None:
             for pred in o:
+                
+                if isinstance(pred, torch.Tensor):
+                    pred = pred.cpu().numpy()
+                
                 box = pred[:4]
                 w = (box[2] - box[0]) / width
                 h = (box[3] - box[1]) / height
@@ -160,7 +168,7 @@ def plot_images(images, targets, paths=None, fname='images.jpg', names=None, max
             for j, box in enumerate(boxes.T):
                 cls = int(classes[j])
                 color = colors[cls % len(colors)]
-                cls = names[cls] if names else cls
+                cls = names[cls] if (names and len(names)) else cls
                 if labels or conf[j] > 0.25:  # 0.25 conf thresh
                     label = '%s' % cls if labels else '%s %.1f' % (cls, conf[j])
                     plot_one_box(box, mosaic, label=label, color=color, line_thickness=tl)

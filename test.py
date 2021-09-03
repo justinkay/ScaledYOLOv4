@@ -97,7 +97,11 @@ def test(data,
     if not training:
         img = torch.zeros((1, 3, imgsz, imgsz), device=device)  # init img
         _ = model(img.half() if half else img) if device.type != 'cpu' else None  # run once
-        path = data['test'] if opt.task == 'test' else data['val']  # path to val/test images
+        
+        # allow additional tasks
+#         path = data['test'] if opt.task == 'test' else data['val']  # path to val/test images
+        path = data[opt.task]
+        
         dataloader = create_dataloader(path, imgsz, batch_size, 64, opt, pad=0.5, rect=True)[0]
 
     seen = 0
@@ -160,13 +164,16 @@ def test(data,
 
             # W&B logging
             if plots and len(wandb_images) < log_imgs:
-                box_data = [{"position": {"minX": xyxy[0], "minY": xyxy[1], "maxX": xyxy[2], "maxY": xyxy[3]},
-                             "class_id": int(cls),
-                             "box_caption": "%s %.3f" % (names[cls], conf),
-                             "scores": {"class_score": conf},
-                             "domain": "pixel"} for *xyxy, conf, cls in pred.tolist()]
-                boxes = {"predictions": {"box_data": box_data, "class_labels": names}}
-                wandb_images.append(wandb.Image(img[si], boxes=boxes, caption=path.name))
+                try:
+                    box_data = [{"position": {"minX": xyxy[0], "minY": xyxy[1], "maxX": xyxy[2], "maxY": xyxy[3]},
+                                 "class_id": int(cls),
+                                 "box_caption": "%s %.3f" % (names[cls], conf),
+                                 "scores": {"class_score": conf},
+                                 "domain": "pixel"} for *xyxy, conf, cls in pred.tolist()]
+                    boxes = {"predictions": {"box_data": box_data, "class_labels": names}}
+                    wandb_images.append(wandb.Image(img[si], boxes=boxes, caption=path.name))
+                except:
+                    print("Error in image generation")
 
             # Clip boxes to image bounds
             clip_coords(pred, (height, width))
@@ -220,10 +227,13 @@ def test(data,
 
         # Plot images
         if plots and batch_i < 3:
-            f = save_dir / f'test_batch{batch_i}_labels.jpg'  # filename
-            plot_images(img, targets, paths, f, names)  # labels
-            f = save_dir / f'test_batch{batch_i}_pred.jpg'
-            plot_images(img, output_to_target(output, width, height), paths, f, names)  # predictions
+            try:
+                f = save_dir / f'test_batch{batch_i}_labels.jpg'  # filename
+                plot_images(img, targets, paths, f, names)  # labels
+                f = save_dir / f'test_batch{batch_i}_pred.jpg'
+                plot_images(img, output_to_target(output, width, height), paths, f, names)  # predictions
+            except:
+                print("plotting failed")
 
     # Compute statistics
     stats = [np.concatenate(x, 0) for x in zip(*stats)]  # to numpy
@@ -315,7 +325,21 @@ if __name__ == '__main__':
     opt.data = check_file(opt.data)  # check file
     print(opt)
 
-    if opt.task in ['val', 'test']:  # run normally
+    if opt.task == 'study':  # run over a range of settings and save/plot
+        for weights in ['yolov4-csp.pt', 'yolov4-csp-x.pt']:
+            f = 'study_%s_%s.txt' % (Path(opt.data).stem, Path(weights).stem)  # filename to save to
+            x = list(range(320, 800, 64))  # x axis
+            y = []  # y axis
+            for i in x:  # img-size
+                print('\nRunning %s point %s...' % (f, i))
+                r, _, t = test(opt.data, weights, opt.batch_size, i, opt.conf_thres, opt.iou_thres, opt.save_json)
+                y.append(r + t)  # results and times
+            np.savetxt(f, y, fmt='%10.4g')  # save
+        os.system('zip -r study.zip study_*.txt')
+        # utils.general.plot_study_txt(f, x)  # plot
+
+#         if opt.task in ['val', 'test']:  # run normally
+    else:
         test(opt.data,
              opt.weights,
              opt.batch_size,
@@ -329,16 +353,3 @@ if __name__ == '__main__':
              save_txt=opt.save_txt,
              save_conf=opt.save_conf,
              )
-
-    elif opt.task == 'study':  # run over a range of settings and save/plot
-        for weights in ['yolov4-csp.pt', 'yolov4-csp-x.pt']:
-            f = 'study_%s_%s.txt' % (Path(opt.data).stem, Path(weights).stem)  # filename to save to
-            x = list(range(320, 800, 64))  # x axis
-            y = []  # y axis
-            for i in x:  # img-size
-                print('\nRunning %s point %s...' % (f, i))
-                r, _, t = test(opt.data, weights, opt.batch_size, i, opt.conf_thres, opt.iou_thres, opt.save_json)
-                y.append(r + t)  # results and times
-            np.savetxt(f, y, fmt='%10.4g')  # save
-        os.system('zip -r study.zip study_*.txt')
-        # utils.general.plot_study_txt(f, x)  # plot
